@@ -51,28 +51,49 @@ namespace ImportTrades
     }
     public partial class Form1 : Form
     {
+        OleDbDataAdapter adapter;
+        DataSet ds = new DataSet();
+        OleDbConnection oleDbConnection;
+        string fileName = @"C:\Users\vbaiyya\Documents\ImportTrades\ImportTrades\autoImport.xlsx";
+        string connectionString;
+        string xlsSheet = "Sheet3";
+
         public Form1()
         {
             InitializeComponent();
+
+            connectionString = string.Format("Provider=Microsoft.Jet.OLEDB.4.0; data source={0}; Extended Properties=Excel 8.0;", fileName);
+            adapter = new OleDbDataAdapter(string.Format("SELECT * FROM [{0}$]", xlsSheet), connectionString);
+            oleDbConnection = new OleDbConnection(connectionString);
             Get_ExcelSheet();
         }
 
         public void Get_ExcelSheet()
         {
-            var fileName = @"C:\autoimport.xlsx";
-            var connectionString = string.Format("Provider=Microsoft.Jet.OLEDB.4.0; data source={0}; Extended Properties=Excel 8.0;", fileName);
-
-            var closedTrades = ReadTrades(connectionString);
+            var closedTrades = ReadTrades();
+            UpdateClosedTradesSheet(closedTrades);
         }
 
-        private static List<ClosedTrade> ReadTrades(string connectionString)
+        private void UpdateClosedTradesSheet( List<ClosedTrade> closedTrades)
         {
-            var adapter = new OleDbDataAdapter("SELECT * FROM [Sheet1$]", connectionString);
-            var ds = new DataSet();
+            adapter.InsertCommand = new OleDbCommand(string.Format("Insert into [{0}$] ([Symbol], [Number of Shares]) Values (?, ?)", xlsSheet), oleDbConnection);
+            adapter.InsertCommand.Parameters.Add("@Symbol", OleDbType.VarChar, 255).SourceColumn = "Symbol";
+            adapter.InsertCommand.Parameters.Add("@Number of Shares", OleDbType.Integer, 4).SourceColumn = "Number of Shares";
 
-            adapter.Fill(ds, "Transactions");
+            DataRow newTradeRow = ds.Tables["Table1"].NewRow();
+            newTradeRow["Symbol"] = "TEST";
+            newTradeRow["Number of Shares"] = 8;
 
-            var data = ds.Tables["Transactions"].AsEnumerable();
+            ds.Tables["Table1"].Rows.Add(newTradeRow);
+
+            adapter.Update(ds, "Table1");
+        }
+
+        private List<ClosedTrade> ReadTrades()
+        {
+            adapter.Fill(ds, "Table1");
+
+            var data = ds.Tables["Table1"].AsEnumerable();
             //
             // Read all the transactions
             //
@@ -92,7 +113,6 @@ namespace ImportTrades
                 List<Transaction> Buys = new List<Transaction>();
                 List<Transaction> Sells = new List<Transaction>();
                 List<ClosedTrade> ClosedTrades = new List<ClosedTrade>();
-                int numTransProcessed = 0;
                 int numShares = 0;
 
             foreach (var grp in transactions)
