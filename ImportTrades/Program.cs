@@ -37,13 +37,14 @@ namespace ImportTrades
     class Program
     {
         OleDbConnection oleDbConnection;
-        string fileName = @"C:\Users\vbaiyya\Documents\ImportTrades\ImportTrades\autoImport.xlsx";
+        string fileName = @"C:\Users\vbaiyya\Google Drive\stocks\autoImport.xlsx";
         string connectionString;
 
-        private void Init()
+        private void Init(string fileName)
         {
             connectionString = string.Format("Provider=Microsoft.Jet.OLEDB.4.0; data source={0}; Extended Properties=Excel 8.0;", fileName);
             oleDbConnection = new OleDbConnection(connectionString);
+            this.fileName = fileName;
         }
 
         private List<ClosedTrade> ReadTrades()
@@ -120,12 +121,14 @@ namespace ImportTrades
                     }
                 }
             }
+            ClosedTrades = ClosedTrades.OrderBy(c => c.FirstBuy).ToList();
             return ClosedTrades;
         }
         static void Main(string[] args)
         {
             Program p = new Program();
-            p.Init();
+            p.Init(args[0]);
+            
             var trades = p.ReadTrades();
             p.WriteTrades(trades);
             
@@ -137,6 +140,20 @@ namespace ImportTrades
             DataSet ds = new DataSet();
 
             adapter.Fill(ds, "ClosedTrades");
+            var closedTradesTable = ds.Tables["ClosedTrades"];
+            List<DataRow> invalidEntries = new List<DataRow>();
+            foreach (DataRow row in closedTradesTable.Rows)
+            {
+                if (string.IsNullOrEmpty(row["Buy DateTime"].ToString()) || string.IsNullOrEmpty(row["Symbol"].ToString()))
+                {
+                    invalidEntries.Add(row);
+                }
+            }
+
+            foreach (DataRow row in invalidEntries)
+            {
+                ds.Tables["ClosedTrades"].Rows.Remove(row);
+            }
 
             adapter.InsertCommand = new OleDbCommand("Insert into [ClosedTradesSheet$] ([Buy DateTime], [Sell DateTime], [Symbol], [Num Shares], [Buy Price/Share], [Sell Price/Share], Commissions) Values (?,?,?,?,?,?,?)", oleDbConnection);
             adapter.InsertCommand.Parameters.Add("@Buy DateTime", OleDbType.DBTimeStamp, 255, "Buy DateTime");
@@ -149,7 +166,7 @@ namespace ImportTrades
 
             foreach (ClosedTrade trade in trades)
             {
-                DataRow newTradeRow = ds.Tables["ClosedTrades"].NewRow();
+                DataRow newTradeRow = closedTradesTable.NewRow();
                 newTradeRow["Buy DateTime"] = trade.FirstBuy;
                 newTradeRow["Sell DateTime"] = trade.LastSell;
                 newTradeRow["Symbol"] = trade.Symbol;
@@ -157,11 +174,10 @@ namespace ImportTrades
                 newTradeRow["Buy Price/Share"] = trade.AvgBuyPricePerShare;
                 newTradeRow["Sell Price/Share"] = trade.AvgSellPricePerShare;
                 newTradeRow["Commissions"] = trade.TotalCommissions;
-                
 
-                ds.Tables["ClosedTrades"].Rows.Add(newTradeRow);
+
+                closedTradesTable.Rows.Add(newTradeRow);
             }
-
             adapter.Update(ds, "ClosedTrades");
         }
     }
