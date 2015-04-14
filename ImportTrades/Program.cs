@@ -49,7 +49,7 @@ namespace ImportTrades
 
         private List<ClosedTrade> ReadTrades()
         {
-            OleDbDataAdapter adapter = new OleDbDataAdapter("SELECT * FROM [Sheet3$]", connectionString);
+            OleDbDataAdapter adapter = new OleDbDataAdapter("SELECT * FROM [Input$]", connectionString);
             DataSet ds = new DataSet();
 
             adapter.Fill(ds, "Table1");
@@ -126,11 +126,18 @@ namespace ImportTrades
         }
         static void Main(string[] args)
         {
-            Program p = new Program();
-            p.Init(args[0]);
-            
-            var trades = p.ReadTrades();
-            p.WriteTrades(trades);
+            try
+            {
+                Program p = new Program();
+                p.Init(args[0]);
+
+                var trades = p.ReadTrades();
+                p.WriteTrades(trades);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
             
         }
 
@@ -141,20 +148,6 @@ namespace ImportTrades
 
             adapter.Fill(ds, "ClosedTrades");
             var closedTradesTable = ds.Tables["ClosedTrades"];
-            List<DataRow> invalidEntries = new List<DataRow>();
-            foreach (DataRow row in closedTradesTable.Rows)
-            {
-                if (string.IsNullOrEmpty(row["Buy DateTime"].ToString()) || string.IsNullOrEmpty(row["Symbol"].ToString()))
-                {
-                    invalidEntries.Add(row);
-                }
-            }
-
-            foreach (DataRow row in invalidEntries)
-            {
-                ds.Tables["ClosedTrades"].Rows.Remove(row);
-            }
-
             adapter.InsertCommand = new OleDbCommand("Insert into [ClosedTradesSheet$] ([Buy DateTime], [Sell DateTime], [Symbol], [Num Shares], [Buy Price/Share], [Sell Price/Share], Commissions) Values (?,?,?,?,?,?,?)", oleDbConnection);
             adapter.InsertCommand.Parameters.Add("@Buy DateTime", OleDbType.DBTimeStamp, 255, "Buy DateTime");
             adapter.InsertCommand.Parameters.Add("@Sell DateTime", OleDbType.DBTimeStamp, 255, "Sell DateTime");
