@@ -1,4 +1,9 @@
-﻿using System;
+﻿//
+// TODO :
+// 1. Make it possible to update the existing trades, by making the buy time and sell time combination as primary key
+// 2. Import all the old trades from IB
+//
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.OleDb;
@@ -8,17 +13,23 @@ using System.Threading.Tasks;
 
 namespace ImportTrades
 {
-    public enum TradeType
+    public enum BuyOrSell
     {
         BOT,
         SLD
     }
-    
+
+    public enum TradeType
+    {
+        LONG,
+        SHORT
+    }
+
     public struct Trade
     {
         public DateTime TradeDateTime;
         public string Symbol;
-        public TradeType BuyOrSell;
+        public BuyOrSell BuyOrSell;
         public float NumShares;
         public float Price;
         public float Commission;
@@ -27,8 +38,9 @@ namespace ImportTrades
     public struct ClosedTrade
     {
         public string Symbol;
-        public DateTime FirstBuy;
-        public DateTime LastSell;
+        public TradeType TradeType;
+        public DateTime EntryTime;
+        public DateTime ExitTime;
         public float NumShares;
         public float AvgBuyPricePerShare;
         public float AvgSellPricePerShare;
@@ -65,7 +77,7 @@ namespace ImportTrades
                 {
                     TradeDateTime = x.Field<DateTime>("DateTime"),
                     Symbol = x.Field<string>("Symbol"),
-                    BuyOrSell = (TradeType)Enum.Parse(typeof(TradeType), x.Field<string>("Action"), true),
+                    BuyOrSell = (BuyOrSell)Enum.Parse(typeof(BuyOrSell), x.Field<string>("Action"), true),
                     NumShares = (float)x.Field<double>("Number of Shares"),
                     Price = (float)x.Field<double>("Price"),
                     Commission = (float)x.Field<double>("Commissions"),
@@ -79,37 +91,54 @@ namespace ImportTrades
             foreach (var grp in transactions)
             {
                 var symbol = grp.Key;
+                //foreach (var trans in grp)
+                //{
+                //    if (trans.TradeDateTime.Date < Convert.ToDateTime("1-1-2005")) ;
+                //    {
+                //        trans.TradeDateTime = Convert.ToDateTime(DateTime.Now.Date);
+                //    }
+                //}
                 var allTrans = grp.OrderBy(t => t.TradeDateTime);
 
                 Buys.Clear();
                 Sells.Clear();
+                TradeType tradeType = TradeType.LONG;
                 foreach (var trans in allTrans)
                 {
                     switch (trans.BuyOrSell)
                     {
-                        case TradeType.BOT:
+                        case BuyOrSell.BOT:
                             {
                                 Buys.Add(trans);
                                 numShares += (int)trans.NumShares;
                                 break;
                             }
-                        case TradeType.SLD:
+                        case BuyOrSell.SLD:
                             {
                                 Sells.Add(trans);
                                 numShares -= (int)trans.NumShares;
                                 break;
                             }
                     }
+                    if (numShares < 0)
+                    {
+                        tradeType = TradeType.SHORT;
+                    }
+                    else if (numShares > 0)
+                    {
+                        tradeType = TradeType.LONG;
+                    }
                     //
                     // When sells cancel out the buys, we closed a trade
                     // 
-                    if (numShares == 0)
+                    else if (numShares == 0)
                     {
                         //Trade closed
                         ClosedTrade trade = new ClosedTrade();
                         trade.Symbol = symbol;
-                        trade.FirstBuy = Buys.Min(t => t.TradeDateTime);
-                        trade.LastSell = Sells.Max(t => t.TradeDateTime);
+                        trade.TradeType = tradeType;
+                        trade.EntryTime = Buys.Min(t => t.TradeDateTime);
+                        trade.ExitTime = Sells.Max(t => t.TradeDateTime);
                         trade.NumShares = Buys.Sum(t => t.NumShares);
                         trade.AvgBuyPricePerShare = Buys.Sum(t => t.NumShares * t.Price) / Buys.Sum(t => t.NumShares);
                         trade.AvgSellPricePerShare = Sells.Sum(t => t.NumShares * t.Price) / Sells.Sum(t => t.NumShares);
@@ -121,7 +150,7 @@ namespace ImportTrades
                     }
                 }
             }
-            ClosedTrades = ClosedTrades.OrderBy(c => c.FirstBuy).ToList();
+            ClosedTrades = ClosedTrades.OrderBy(c => c.EntryTime).ToList();
             return ClosedTrades;
         }
         static void Main(string[] args)
@@ -143,35 +172,56 @@ namespace ImportTrades
 
         private void WriteTrades(List<ClosedTrade> trades)
         {
+            // Get Existing data into the table
             OleDbDataAdapter adapter = new OleDbDataAdapter("SELECT * FROM [ClosedTradesSheet$]", connectionString);
             DataSet ds = new DataSet();
-
             adapter.Fill(ds, "ClosedTrades");
-            var closedTradesTable = ds.Tables["ClosedTrades"];
-            adapter.InsertCommand = new OleDbCommand("Insert into [ClosedTradesSheet$] ([Buy DateTime], [Sell DateTime], [Symbol], [Num Shares], [Buy Price/Share], [Sell Price/Share], Commissions) Values (?,?,?,?,?,?,?)", oleDbConnection);
-            adapter.InsertCommand.Parameters.Add("@Buy DateTime", OleDbType.DBTimeStamp, 255, "Buy DateTime");
-            adapter.InsertCommand.Parameters.Add("@Sell DateTime", OleDbType.DBTimeStamp, 255, "Sell DateTime");
+            
+            // prepare the Insert Command
+            adapter.InsertCommand = new OleDbCommand("INSERT INTO [ClosedTradesSheet$] ([Symbol], [Long/Short], [Entry DateTime], [Exit DateTime], [Num Shares], [Buy Price/Share], [Sell Price/Share], Commissions) VALUES (?,?,?,?,?,?,?,?)", oleDbConnection);
             adapter.InsertCommand.Parameters.Add("@Symbol", OleDbType.VarChar, 255, "Symbol");
+            adapter.InsertCommand.Parameters.Add("@Long/Short", OleDbType.VarChar, 255, "Long/Short");
+            adapter.InsertCommand.Parameters.Add("@Entry DateTime", OleDbType.DBTimeStamp, 255, "Entry DateTime");
+            adapter.InsertCommand.Parameters.Add("@Exit DateTime", OleDbType.DBTimeStamp, 255, "Exit DateTime");
             adapter.InsertCommand.Parameters.Add("@NumShares", OleDbType.Integer, 4,"Num Shares");
             adapter.InsertCommand.Parameters.Add("@Buy Price/Share", OleDbType.Single, 4, "Buy Price/Share");
             adapter.InsertCommand.Parameters.Add("@Sell Price/Share", OleDbType.Single, 4,"Sell Price/Share");
             adapter.InsertCommand.Parameters.Add("@Commissions", OleDbType.Single, 4, "Commissions");
+            //adapter.InsertCommand.Parameters.Add("@Total", OleDbType.Single, 4, "Total");
+            //adapter.InsertCommand.Parameters.Add("@Total Commissions", OleDbType.Single, 4, "Total Commissions");
+            //adapter.InsertCommand.Parameters.Add("@Total With Commissions", OleDbType.Single, 4, "Total With Commissions");
+            //adapter.InsertCommand.Parameters.Add("@Label", OleDbType.VarChar, 255, "Label");
 
+            DateTime previousTrade = trades.First().EntryTime;
             foreach (ClosedTrade trade in trades)
             {
-                DataRow newTradeRow = closedTradesTable.NewRow();
-                newTradeRow["Buy DateTime"] = trade.FirstBuy;
-                newTradeRow["Sell DateTime"] = trade.LastSell;
+                DataRow newTradeRow = ds.Tables["ClosedTrades"].NewRow();
                 newTradeRow["Symbol"] = trade.Symbol;
+                newTradeRow["Long/Short"] = (trade.TradeType == TradeType.LONG)?"Long":"Short";
+                newTradeRow["Entry DateTime"] = trade.EntryTime;
+                newTradeRow["Exit DateTime"] = trade.ExitTime;
                 newTradeRow["Num Shares"] = trade.NumShares;
                 newTradeRow["Buy Price/Share"] = trade.AvgBuyPricePerShare;
                 newTradeRow["Sell Price/Share"] = trade.AvgSellPricePerShare;
                 newTradeRow["Commissions"] = trade.TotalCommissions;
 
-
-                closedTradesTable.Rows.Add(newTradeRow);
+                ds.Tables["ClosedTrades"].Rows.Add(newTradeRow);
             }
             adapter.Update(ds, "ClosedTrades");
+
+            //// prepare the Update Command
+            //adapter.UpdateCommand = new OleDbCommand("UPDATE [ClosedTradesSheet$] SET Total = @total, [Total Commissions] = @totalCommissions, [Total With Commissions] = @totalWithCommissions, Label = @label WHERE [Entry DateTime] = @buyDateTime AND [Exit DateTime] = @sellDateTime", oleDbConnection);
+            //adapter.UpdateCommand.Parameters.AddWithValue("@total", 10.0f);
+            //adapter.UpdateCommand.Parameters.AddWithValue("@totalCommissions", 10.0f);
+            //adapter.UpdateCommand.Parameters.AddWithValue("@totalWithCommissions", 10.0f);
+            //adapter.UpdateCommand.Parameters.AddWithValue("@label", "test");
+            //adapter.UpdateCommand.Parameters.AddWithValue("@buyDateTime", trades.First().FirstBuy);
+            //adapter.UpdateCommand.Parameters.AddWithValue("@sellDateTime", trades.First().LastSell);
+            //oleDbConnection.Open();
+            //adapter.UpdateCommand.ExecuteNonQuery();
+            //oleDbConnection.Close();
+
+            
         }
     }
 }
