@@ -137,8 +137,16 @@ namespace ImportTrades
                         ClosedTrade trade = new ClosedTrade();
                         trade.Symbol = symbol;
                         trade.TradeType = tradeType;
-                        trade.EntryTime = Buys.Min(t => t.TradeDateTime);
-                        trade.ExitTime = Sells.Max(t => t.TradeDateTime);
+                        if (tradeType == TradeType.LONG)
+                        {
+                            trade.EntryTime = Buys.Min(t => t.TradeDateTime);
+                            trade.ExitTime = Sells.Max(t => t.TradeDateTime);
+                        }
+                        else if (tradeType == TradeType.SHORT)
+                        {
+                            trade.EntryTime = Sells.Min(t => t.TradeDateTime);
+                            trade.ExitTime = Buys.Max(t => t.TradeDateTime);
+                        }
                         trade.NumShares = Buys.Sum(t => t.NumShares);
                         trade.AvgBuyPricePerShare = Buys.Sum(t => t.NumShares * t.Price) / Buys.Sum(t => t.NumShares);
                         trade.AvgSellPricePerShare = Sells.Sum(t => t.NumShares * t.Price) / Sells.Sum(t => t.NumShares);
