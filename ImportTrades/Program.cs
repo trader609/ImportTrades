@@ -87,18 +87,29 @@ namespace ImportTrades
             List<Trade> Sells = new List<Trade>();
             List<ClosedTrade> ClosedTrades = new List<ClosedTrade>();
             int numShares = 0;
+            DateTime Jan_1_2005 = Convert.ToDateTime("1-1-2005");
+            
 
             foreach (var grp in transactions)
             {
                 var symbol = grp.Key;
+                var grpArr = grp.ToArray();
+                for (var i = 0; i < grpArr.Count();++i)
+                {
+                    if (grpArr[i].TradeDateTime < Jan_1_2005)
+                    {
+                        var tradeTime = grpArr[i].TradeDateTime.ToShortTimeString();
+                        grpArr[i].TradeDateTime = DateTime.Parse( DateTime.Now.ToShortDateString() + " " + grpArr[i].TradeDateTime.ToShortTimeString());
+                    }
+                }
                 //foreach (var trans in grp)
                 //{
                 //    if (trans.TradeDateTime.Date < Convert.ToDateTime("1-1-2005")) ;
                 //    {
-                //        trans.TradeDateTime = Convert.ToDateTime(DateTime.Now.Date);
+                //       // trans.TradeDateTime = Convert.ToDateTime(DateTime.Now.Date);
                 //    }
                 //}
-                var allTrans = grp.OrderBy(t => t.TradeDateTime);
+                var allTrans = grpArr.OrderBy(t => t.TradeDateTime);
 
                 Buys.Clear();
                 Sells.Clear();
