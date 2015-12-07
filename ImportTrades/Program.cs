@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.OleDb;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -25,6 +26,14 @@ namespace ImportTrades
         SHORT
     }
 
+    public struct TradeMarker
+    {
+        public int MarkerId;
+        public DateTime TradeDateTime;
+        public string Symbol;
+        public BuyOrSell BuyOrSell;
+        public float Price;
+    }
     public struct Trade
     {
         public DateTime TradeDateTime;
@@ -35,12 +44,14 @@ namespace ImportTrades
         public float Commission;
     }
 
-    public struct ClosedTrade
+    public struct ClosedPosition
     {
         public string Symbol;
         public TradeType TradeType;
         public DateTime EntryTime;
         public DateTime ExitTime;
+        public List<Trade> Entries;
+        public List<Trade> Exits;
         public float NumShares;
         public float AvgBuyPricePerShare;
         public float AvgSellPricePerShare;
@@ -48,18 +59,62 @@ namespace ImportTrades
     }
     class Program
     {
-        OleDbConnection oleDbConnection;
-        string fileName = @"C:\Users\vbaiyya\Google Drive\stocks\autoImport.xlsx";
-        string connectionString;
-
-        private void Init(string fileName)
+        private enum Action
         {
-            connectionString = string.Format("Provider=Microsoft.Jet.OLEDB.4.0; data source={0}; Extended Properties=Excel 8.0;", fileName);
-            oleDbConnection = new OleDbConnection(connectionString);
-            this.fileName = fileName;
+            SUMMARIZE,
+            GENERATETS
+        }
+        /// <summary>
+        /// Reads raw trades from the excel sheet and either writes them in the
+        /// summary sheet or generates thinkscript to plot the trades as arrows on charts
+        /// </summary>
+        /// <param name="args">
+        /// arg 0 : path to the source excel file
+        /// arg 1 : Write closed trades to sheet or generate thinkscript
+        ///     1 : write closed trades
+        ///     2 : generate thinkscript
+        /// </param>
+        static void Main(string[] args)
+        {
+            string excelFilename = args[0];
+
+            try
+            {
+                Action action = args.Count() > 1 && int.Parse(args[1]) == 2 ? Action.GENERATETS : Action.SUMMARIZE;
+                var connectionString = string.Format("Provider=Microsoft.Jet.OLEDB.4.0; data source={0}; Extended Properties=Excel 8.0;", args[0]);
+
+                var trades = ReadTrades(connectionString);
+                trades = FixDates(trades);
+                var closedPositions = ComputeClosedPositions(trades);
+
+                switch (action)
+                {
+                    case Action.SUMMARIZE:
+                        WriteTrades(closedPositions, connectionString);
+                        break;
+
+                    case Action.GENERATETS:
+                        TSGenerator ts = new TSGenerator();
+                        var script = ts.GenerateTS(closedPositions);
+                        File.WriteAllLines(@"d:\scratch\test.ts", script);
+                        break;
+                }
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
         }
 
-        private List<ClosedTrade> ReadTrades()
+      
+        /// <summary>
+        /// Reads raw trades from the excel sheet and returns a list of them.
+        /// </summary>
+        /// <param name="connectionString"></param>
+        /// <returns></returns>
+        private static IEnumerable<Trade> ReadTrades(string connectionString)
         {
             OleDbDataAdapter adapter = new OleDbDataAdapter("SELECT * FROM [Input$]", connectionString);
             DataSet ds = new DataSet();
@@ -81,41 +136,79 @@ namespace ImportTrades
                     NumShares = (float)x.Field<double>("Number of Shares"),
                     Price = (float)x.Field<double>("Price"),
                     Commission = (float)x.Field<double>("Commissions"),
-                }).GroupBy(t => t.Symbol);
+                });
 
+                return transactions;
+
+        }
+
+        /// <summary>
+        /// Parses each trade and fixes the date.
+        /// Trades made today will not have a year associated with them in the excel sheet which results in
+        /// .Net parsing the year as 1900.
+        /// This code identifies those trades and fixes the date to today.
+        /// </summary>
+        /// <param name="transactions"></param>
+        /// <returns></returns>
+        private static IEnumerable<Trade> FixDates(IEnumerable<Trade> transactions)
+        {
+            DateTime Jan_1_2005 = Convert.ToDateTime("1-1-2005");
+
+            var transactionsList = transactions.ToArray();
+            for (int i = 0; i < transactions.Count(); ++i)
+            {
+                if (transactionsList[i].TradeDateTime < Jan_1_2005)
+                {
+                    //var tradeTime = transactionsList[i].TradeDateTime.ToShortTimeString();
+                    //transactionsList[i].TradeDateTime = DateTime.Parse(DateTime.Now.ToShortDateString() + " " + transactionsList[i].TradeDateTime.ToLongTimeString());
+                    transactionsList[i].TradeDateTime = new DateTime(
+                        DateTime.Now.Year,
+                        DateTime.Now.Month,
+                        DateTime.Now.Day,
+                        transactionsList[i].TradeDateTime.Hour,
+                        transactionsList[i].TradeDateTime.Minute,
+                        transactionsList[i].TradeDateTime.Second);
+                }
+            }
+
+            return transactionsList;
+        }
+
+        /// <summary>
+        /// Computes closed trades
+        /// </summary>
+        /// <param name="transactions"></param>
+        /// <returns></returns>
+        private static IEnumerable<ClosedPosition> ComputeClosedPositions(IEnumerable<Trade> transactions)
+        {
             List<Trade> Buys = new List<Trade>();
             List<Trade> Sells = new List<Trade>();
-            List<ClosedTrade> ClosedTrades = new List<ClosedTrade>();
+            List<ClosedPosition> ClosedPositions = new List<ClosedPosition>();
+            List<TradeMarker> TradeMarkers = new List<TradeMarker>();
             int numShares = 0;
-            DateTime Jan_1_2005 = Convert.ToDateTime("1-1-2005");
+            int tradeId = 0;
+            var transactionsBySymbol = transactions.GroupBy(t => t.Symbol);
             
 
-            foreach (var grp in transactions)
+            foreach (var grp in transactionsBySymbol)
             {
                 var symbol = grp.Key;
-                var grpArr = grp.ToArray();
-                for (var i = 0; i < grpArr.Count();++i)
-                {
-                    if (grpArr[i].TradeDateTime < Jan_1_2005)
-                    {
-                        var tradeTime = grpArr[i].TradeDateTime.ToShortTimeString();
-                        grpArr[i].TradeDateTime = DateTime.Parse( DateTime.Now.ToShortDateString() + " " + grpArr[i].TradeDateTime.ToShortTimeString());
-                    }
-                }
-                //foreach (var trans in grp)
-                //{
-                //    if (trans.TradeDateTime.Date < Convert.ToDateTime("1-1-2005")) ;
-                //    {
-                //       // trans.TradeDateTime = Convert.ToDateTime(DateTime.Now.Date);
-                //    }
-                //}
-                var allTrans = grpArr.OrderBy(t => t.TradeDateTime);
+               
+               
+                var grpOrderedByTime = grp.OrderBy(t => t.TradeDateTime);
 
                 Buys.Clear();
                 Sells.Clear();
                 TradeType tradeType = TradeType.LONG;
-                foreach (var trans in allTrans)
+                foreach (var trans in grpOrderedByTime)
                 {
+                    TradeMarker tMarker = new TradeMarker();
+                    tMarker.Symbol = symbol;
+                    tMarker.BuyOrSell = trans.BuyOrSell;
+                    tMarker.MarkerId = tradeId;
+                    tMarker.Price = trans.Price;
+                    tMarker.TradeDateTime = trans.TradeDateTime;
+                    TradeMarkers.Add(tMarker);
                     switch (trans.BuyOrSell)
                     {
                         case BuyOrSell.BOT:
@@ -145,52 +238,46 @@ namespace ImportTrades
                     else if (numShares == 0)
                     {
                         //Trade closed
-                        ClosedTrade trade = new ClosedTrade();
+                        ClosedPosition trade = new ClosedPosition();
                         trade.Symbol = symbol;
                         trade.TradeType = tradeType;
                         if (tradeType == TradeType.LONG)
                         {
                             trade.EntryTime = Buys.Min(t => t.TradeDateTime);
                             trade.ExitTime = Sells.Max(t => t.TradeDateTime);
+                            trade.Entries = new List<Trade>(Buys);
+                            trade.Exits = new List<Trade>(Sells);
                         }
                         else if (tradeType == TradeType.SHORT)
                         {
                             trade.EntryTime = Sells.Min(t => t.TradeDateTime);
                             trade.ExitTime = Buys.Max(t => t.TradeDateTime);
+                            trade.Entries = new List<Trade>(Sells);
+                            trade.Exits = new List<Trade>(Buys);
                         }
                         trade.NumShares = Buys.Sum(t => t.NumShares);
                         trade.AvgBuyPricePerShare = Buys.Sum(t => t.NumShares * t.Price) / Buys.Sum(t => t.NumShares);
                         trade.AvgSellPricePerShare = Sells.Sum(t => t.NumShares * t.Price) / Sells.Sum(t => t.NumShares);
                         trade.TotalCommissions = Buys.Sum(t => t.Commission) + Sells.Sum(t => t.Commission);
 
-                        ClosedTrades.Add(trade);
+                        ClosedPositions.Add(trade);
                         Buys.Clear();
                         Sells.Clear();
+                        tradeId++;
                     }
                 }
             }
-            ClosedTrades = ClosedTrades.OrderBy(c => c.EntryTime).ToList();
-            return ClosedTrades;
+            return ClosedPositions.OrderBy(c => c.EntryTime);
         }
-        static void Main(string[] args)
+       
+        /// <summary>
+        /// Writes the closed trades into the excel sheet.
+        /// </summary>
+        /// <param name="closedPositions"></param>
+        /// <param name="connectionString"></param>
+        private static void WriteTrades(IEnumerable<ClosedPosition> closedPositions, string connectionString)
         {
-            try
-            {
-                Program p = new Program();
-                p.Init(args[0]);
-
-                var trades = p.ReadTrades();
-                p.WriteTrades(trades);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
-            
-        }
-
-        private void WriteTrades(List<ClosedTrade> trades)
-        {
+            OleDbConnection oleDbConnection = new OleDbConnection(connectionString);
             // Get Existing data into the table
             OleDbDataAdapter adapter = new OleDbDataAdapter("SELECT * FROM [ClosedTradesSheet$]", connectionString);
             DataSet ds = new DataSet();
@@ -211,8 +298,8 @@ namespace ImportTrades
             //adapter.InsertCommand.Parameters.Add("@Total With Commissions", OleDbType.Single, 4, "Total With Commissions");
             //adapter.InsertCommand.Parameters.Add("@Label", OleDbType.VarChar, 255, "Label");
 
-            DateTime previousTrade = trades.First().EntryTime;
-            foreach (ClosedTrade trade in trades)
+            DateTime previousTrade = closedPositions.First().EntryTime;
+            foreach (ClosedPosition trade in closedPositions)
             {
                 DataRow newTradeRow = ds.Tables["ClosedTrades"].NewRow();
                 newTradeRow["Symbol"] = trade.Symbol;
