@@ -96,7 +96,8 @@ namespace ImportTrades
                     case Action.GENERATETS:
                         TSGenerator ts = new TSGenerator();
                         var script = ts.GenerateTS(closedPositions);
-                        File.WriteAllLines(@"d:\scratch\test.ts", script);
+                        string outFile =args.Count() > 2 ? args[2] : @"d:\scratch\test.ts";
+                        File.WriteAllLines(outFile, script);
                         break;
                 }
                 
