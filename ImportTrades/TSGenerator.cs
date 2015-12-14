@@ -31,48 +31,21 @@ namespace ImportTrades
         /// <returns></returns>
         public List<string> GenerateTS(ClosedPosition closedPosition, int id)
         {
-            List<string> tsScriptLines = null;
+            List<string> tsScriptLines = new List<string>();
             try
             {
-                string buyPlotName = string.Format("buyPlot{0}{1}", closedPosition.Symbol, id);
-                string sellPlotName = string.Format("sellPlot{0}{1}", closedPosition.Symbol, id);
+                var buys = closedPosition.TradeType == TradeType.LONG ? closedPosition.Entries : closedPosition.Exits;
+                var sells = closedPosition.TradeType == TradeType.LONG ? closedPosition.Exits : closedPosition.Entries;
                 string correctSymbolStr = string.Format("correctSymbol{0}{1}", closedPosition.Symbol, id);
-                string plotColor = colors[colors.Length % (id)];
+                tsScriptLines.Add("#################################################################");
+                tsScriptLines.Add(string.Format("def {0} = (GetSymbol() == \"{1}\");",correctSymbolStr, closedPosition.Symbol));
 
-                tsScriptLines = new List<string>
-                {
-                    "##########################################################################",
-                    "",
-                    "#",
-                    string.Format("# {0} trades", closedPosition.Symbol),
-                    "#",
-                    string.Format("plot {0};", buyPlotName),
-                    string.Format("plot {0};", sellPlotName),
-                    string.Format("def {0} = (GetSymbol() == \"{1}\");", correctSymbolStr, closedPosition.Symbol),
-                    string.Format("{0}.SetPaintingStrategy(PaintingStrategy.ARROW_UP);", buyPlotName),
-                    string.Format("{0}.SetDefaultColor({1});", buyPlotName, plotColor),
-                    string.Format("{0}.SetLineWeight(2);", buyPlotName),
-                    string.Format("{0}.SetPaintingStrategy(PaintingStrategy.ARROW_DOWN);", sellPlotName),
-                    string.Format("{0}.SetDefaultColor({1});", sellPlotName, plotColor),
-                    string.Format("{0}.SetLineWeight(2);", sellPlotName),
-                    "",
-                };
+                tsScriptLines.AddRange(GeneratePlotTs(id, correctSymbolStr, buys));
+                tsScriptLines.AddRange(GeneratePlotTs(id, correctSymbolStr, sells));
                 
-                // 5 min body
-                var tsBody = GenerateTSBody(buyPlotName, sellPlotName, correctSymbolStr, closedPosition, AggregationPeriod.FIVE_MIN);
-                tsScriptLines.AddRange(tsBody);
 
-                // 2 min body
-                tsBody = GenerateTSBody(buyPlotName, sellPlotName, correctSymbolStr, closedPosition, AggregationPeriod.TWO_MIN);
-                tsScriptLines.AddRange(tsBody);
-
-                // final else block
-                tsScriptLines.Add("{");
-                tsScriptLines.Add(
-                    string.Format("\t{0} = Double.NaN;", buyPlotName));// NaN
-                tsScriptLines.Add(
-                    string.Format("\t{0} = Double.NaN;", sellPlotName));// NaN
-                tsScriptLines.Add("}");
+                return tsScriptLines;
+                
             }
             catch (System.FormatException formatEx)
             {
@@ -83,79 +56,44 @@ namespace ImportTrades
         }
 
         /// <summary>
-        /// Generates TS body for a closed position
+        /// Generates plots for the trades
         /// </summary>
-        /// <param name="buyPlotName"></param>
-        /// <param name="sellPlotName"></param>
+        /// <param name="id"></param>
         /// <param name="correctSymbolStr"></param>
-        /// <param name="closedPosition"></param>
-        /// <param name="chartPeriod"></param>
+        /// <param name="trades"></param>
         /// <returns></returns>
-        private static List<string> GenerateTSBody(
-            string buyPlotName,
-            string sellPlotName,
-            string correctSymbolStr,
-            ClosedPosition closedPosition,
-            AggregationPeriod chartPeriod)
+        private List<string> GeneratePlotTs(int id, string correctSymbolStr, List<Trade> trades)
         {
-            List<string> tsScriptBodyLines = new List<string>();
+            string plotColor = colors[colors.Length % (id)];
+            List<string> tsScript = new List<string>();
 
-            tsScriptBodyLines.Add(string.Format("# {0} min markers", (int)chartPeriod));
-            tsScriptBodyLines.Add(string.Format("if {0} and Is{1}MinChart", correctSymbolStr, (int)chartPeriod));
-            tsScriptBodyLines.Add("{");
-
-            List<Trade> buys = null;
-            List<Trade> sells = null;
-            if (closedPosition.TradeType == TradeType.LONG)
+            for (var i = 1; i <= trades.Count; ++i)
             {
-                buys = closedPosition.Entries;
-                sells = closedPosition.Exits;
-            }
-            else if (closedPosition.TradeType == TradeType.SHORT)
-            {
-                buys = closedPosition.Exits;
-                sells = closedPosition.Entries;
-            }
-            // Script all the buys
-            foreach (Trade buy in buys)
-            {
+                var buy = trades[i - 1];
+                string plotName = string.Format("{0}Plot{1}{2}_{3}", buy.BuyOrSell == BuyOrSell.BOT ? "buy" : "sell", buy.Symbol, id, i);
                 string tradeDateCondition = string.Format("GetYYYYMMDD() == {0}", buy.TradeDateTime.ToString("yyyyMMdd"));
-                tsScriptBodyLines.Add(
-                    string.Format("\tif {0} and SecondsTillTime({1}) == 0", tradeDateCondition, GetRoundedTime(buy.TradeDateTime, chartPeriod)));// 5 min time
-                tsScriptBodyLines.Add("\t{");
-                tsScriptBodyLines.Add(
-                    string.Format("\t\t{0} = {1};", buyPlotName, buy.Price));// buy price
-                tsScriptBodyLines.Add(
-                    string.Format("\t\t{0} = Double.NaN;", sellPlotName));// NaN
-                tsScriptBodyLines.Add("\t}");
-                tsScriptBodyLines.Add("\telse");
+                string tradeTimeCondition5Min = string.Format("SecondsTillTime({0}) == 0", GetRoundedTime(buy.TradeDateTime, AggregationPeriod.FIVE_MIN));
+                string tradeTimeCondition2Min = string.Format("SecondsTillTime({0}) == 0", GetRoundedTime(buy.TradeDateTime, AggregationPeriod.TWO_MIN));
+
+                tsScript.Add(string.Format("plot {0};", plotName));
+                tsScript.Add(string.Format("{0}.SetPaintingStrategy({1});", plotName, buy.BuyOrSell == BuyOrSell.BOT ? "PaintingStrategy.ARROW_UP" : "PaintingStrategy.ARROW_DOWN"));
+                tsScript.Add(string.Format("{0}.SetDefaultColor({1});", plotName, plotColor));
+                tsScript.Add(string.Format("{0}.SetLineWeight(3);", plotName));
+                tsScript.Add(string.Format("if Is{0}MinChart", 5));
+                tsScript.Add("{");
+                tsScript.Add(string.Format("\t{0} = if {1} and {2} and {3} then {4} else Double.NaN;", plotName, correctSymbolStr, tradeDateCondition, tradeTimeCondition5Min, buy.Price));
+                tsScript.Add("}");
+                tsScript.Add(string.Format("else if Is{0}MinChart", 2));
+                tsScript.Add("{");
+                tsScript.Add(string.Format("\t{0} = if {1} and {2} and {3} then {4} else Double.NaN;", plotName, correctSymbolStr, tradeDateCondition, tradeTimeCondition2Min, buy.Price));
+                tsScript.Add("}");
+                tsScript.Add("else");
+                tsScript.Add("{");
+                tsScript.Add(string.Format("\t{0} = Double.NaN;", plotName));
+                tsScript.Add("}");
+                tsScript.Add("\n");
             }
-
-            // Script all the sells
-            foreach (Trade sell in sells)
-            {
-                string tradeDateCondition = string.Format("GetYYYYMMDD() == {0}", sell.TradeDateTime.ToString("yyyyMMdd"));
-                tsScriptBodyLines.Add(
-                    string.Format("\tif {0} and SecondsTillTime({1}) == 0", tradeDateCondition, GetRoundedTime(sell.TradeDateTime, chartPeriod)));// 5 min time
-                tsScriptBodyLines.Add("\t{");
-                tsScriptBodyLines.Add(
-                    string.Format("\t\t{0} = Double.NaN;", buyPlotName));// NaN
-                tsScriptBodyLines.Add(
-                    string.Format("\t\t{0} = {1};", sellPlotName, sell.Price));// buy price
-                tsScriptBodyLines.Add("\t}");
-                tsScriptBodyLines.Add("\telse");
-            }
-            tsScriptBodyLines.Add("\t{");
-            tsScriptBodyLines.Add(
-                string.Format("\t\t{0} = Double.NaN;", buyPlotName));// NaN
-            tsScriptBodyLines.Add(
-                string.Format("\t\t{0} = Double.NaN;", sellPlotName));// NaN
-            tsScriptBodyLines.Add("\t}");
-
-            tsScriptBodyLines.Add("}");
-            tsScriptBodyLines.Add("else");
-
-            return tsScriptBodyLines;
+            return tsScript;
         }
 
         /// <summary>
