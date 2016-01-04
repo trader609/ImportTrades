@@ -285,12 +285,12 @@ namespace ImportTrades
             adapter.Fill(ds, "ClosedTrades");
             
             // prepare the Insert Command
-            adapter.InsertCommand = new OleDbCommand("INSERT INTO [ClosedTradesSheet$] ([Symbol], [Long/Short], [Entry DateTime], [Exit DateTime], [Num Shares], [Buy Price/Share], [Sell Price/Share], Commissions) VALUES (?,?,?,?,?,?,?,?)", oleDbConnection);
-            adapter.InsertCommand.Parameters.Add("@Symbol", OleDbType.VarChar, 255, "Symbol");
-            adapter.InsertCommand.Parameters.Add("@Long/Short", OleDbType.VarChar, 255, "Long/Short");
-            adapter.InsertCommand.Parameters.Add("@Entry DateTime", OleDbType.DBTimeStamp, 255, "Entry DateTime");
-            adapter.InsertCommand.Parameters.Add("@Exit DateTime", OleDbType.DBTimeStamp, 255, "Exit DateTime");
-            adapter.InsertCommand.Parameters.Add("@NumShares", OleDbType.Integer, 4,"Num Shares");
+            adapter.InsertCommand = new OleDbCommand("INSERT INTO [ClosedTradesSheet$] ([SYM], [Type], [Entry Time], [Exit Time], [Shares], [Buy Price/Share], [Sell Price/Share], Commissions) VALUES (?,?,?,?,?,?,?,?)", oleDbConnection);
+            adapter.InsertCommand.Parameters.Add("@SYM", OleDbType.VarChar, 255, "SYM");
+            adapter.InsertCommand.Parameters.Add("@Type", OleDbType.VarChar, 255, "Type");
+            adapter.InsertCommand.Parameters.Add("@Entry Time", OleDbType.DBTimeStamp, 255, "Entry Time");
+            adapter.InsertCommand.Parameters.Add("@Exit Time", OleDbType.DBTimeStamp, 255, "Exit Time");
+            adapter.InsertCommand.Parameters.Add("@Shares", OleDbType.Integer, 4,"Shares");
             adapter.InsertCommand.Parameters.Add("@Buy Price/Share", OleDbType.Single, 4, "Buy Price/Share");
             adapter.InsertCommand.Parameters.Add("@Sell Price/Share", OleDbType.Single, 4,"Sell Price/Share");
             adapter.InsertCommand.Parameters.Add("@Commissions", OleDbType.Single, 4, "Commissions");
@@ -303,11 +303,11 @@ namespace ImportTrades
             foreach (ClosedPosition trade in closedPositions)
             {
                 DataRow newTradeRow = ds.Tables["ClosedTrades"].NewRow();
-                newTradeRow["Symbol"] = trade.Symbol;
-                newTradeRow["Long/Short"] = (trade.TradeType == TradeType.LONG)?"Long":"Short";
-                newTradeRow["Entry DateTime"] = trade.EntryTime;
-                newTradeRow["Exit DateTime"] = trade.ExitTime;
-                newTradeRow["Num Shares"] = trade.NumShares;
+                newTradeRow["SYM"] = trade.Symbol;
+                newTradeRow["Type"] = (trade.TradeType == TradeType.LONG)?"Long":"Short";
+                newTradeRow["Entry Time"] = trade.EntryTime;
+                newTradeRow["Exit Time"] = trade.ExitTime;
+                newTradeRow["Shares"] = trade.NumShares;
                 newTradeRow["Buy Price/Share"] = trade.AvgBuyPricePerShare;
                 newTradeRow["Sell Price/Share"] = trade.AvgSellPricePerShare;
                 newTradeRow["Commissions"] = trade.TotalCommissions;
