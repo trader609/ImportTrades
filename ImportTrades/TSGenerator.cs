@@ -64,7 +64,7 @@ namespace ImportTrades
         /// <returns></returns>
         private List<string> GeneratePlotTs(int id, string correctSymbolStr, List<Trade> trades)
         {
-            string plotColor = colors[colors.Length % (id)];
+            string plotColor = colors[id % colors.Length];
             List<string> tsScript = new List<string>();
 
             for (var i = 1; i <= trades.Count; ++i)
@@ -120,34 +120,42 @@ namespace ImportTrades
         /// <returns></returns>
         internal string[] GenerateTS(IEnumerable<ClosedPosition> closedPositions)
         {
-            //
-            // common header
-            //
-            AddCommonHeader();
-           
-            // We want to use different colors for marking different trades on the same symbol on the
-            // same day. We do this by seggregating the trades by DayOfYear.
-            // Then for each day, we seggregate by the symbol.
-            // Then we call GenerateTS for each trade for that symbol
-            // 
-            var closedPositionsByDate = closedPositions.GroupBy(c => c.EntryTime.DayOfYear);
-            foreach(var closedPositionsPerDay in closedPositionsByDate)
+            try
             {
-                var closedPositionsPerDayPerSym = closedPositionsPerDay.GroupBy(c => c.Symbol);
-                foreach(var closedPositionsPerDayPerSymGrp in closedPositionsPerDayPerSym)
+
+                //
+                // common header
+                //
+                AddCommonHeader();
+
+                // We want to use different colors for marking different trades on the same symbol on the
+                // same day. We do this by seggregating the trades by DayOfYear.
+                // Then for each day, we seggregate by the symbol.
+                // Then we call GenerateTS for each trade for that symbol
+                // 
+                var closedPositionsByDate = closedPositions.GroupBy(c => c.EntryTime.DayOfYear);
+                foreach (var closedPositionsPerDay in closedPositionsByDate)
                 {
-                    int i = 1;
-                    var closedPositionsPerDayPerSymList = closedPositionsPerDayPerSymGrp.ToList();
-                    foreach (var closedPosition in closedPositionsPerDayPerSymList)
+                    var closedPositionsPerDayPerSym = closedPositionsPerDay.GroupBy(c => c.Symbol);
+                    foreach (var closedPositionsPerDayPerSymGrp in closedPositionsPerDayPerSym)
                     {
-                        var tsScriptLines = GenerateTS(closedPosition, i);
-                        _tsScriptLines.AddRange(tsScriptLines);
-                        ++i;
+                        int i = 1;
+                        var closedPositionsPerDayPerSymList = closedPositionsPerDayPerSymGrp.ToList();
+                        foreach (var closedPosition in closedPositionsPerDayPerSymList)
+                        {
+                            var tsScriptLines = GenerateTS(closedPosition, i);
+                            _tsScriptLines.AddRange(tsScriptLines);
+                            ++i;
+                        }
                     }
                 }
             }
+            catch(Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
             return _tsScriptLines.ToArray();
-        }
+            }
 
         /// <summary>
         /// Common TS header
